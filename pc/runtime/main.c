@@ -383,13 +383,89 @@ static uint32_t crc32_buf(const uint8_t *p, size_t n)
     return ~c;
 }
 
+/* ---- ROM search in a folder (rom_dir): by content, not by name ---- */
+#ifdef _WIN32
+#include <windows.h>
+static int list_dir(const char *dir, char (*names)[1024], int max)
+{
+    char pat[1100];
+    wchar_t wpat[1100];
+    snprintf(pat, sizeof pat, "%s%s*", dir, (*dir && dir[strlen(dir) - 1] != '/' && dir[strlen(dir) - 1] != '\\') ? "\\" : "");
+    MultiByteToWideChar(CP_UTF8, 0, pat, -1, wpat, 1100);
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW(wpat, &fd);
+    int n = 0;
+    if (h == INVALID_HANDLE_VALUE) return 0;
+    do {
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+        char name[700];
+        WideCharToMultiByte(CP_UTF8, 0, fd.cFileName, -1, name, sizeof name, NULL, NULL);
+        snprintf(names[n++], 1024, "%s%s%s", dir,
+                 (*dir && dir[strlen(dir) - 1] != '/' && dir[strlen(dir) - 1] != '\\') ? "\\" : "", name);
+    } while (n < max && FindNextFileW(h, &fd));
+    FindClose(h);
+    return n;
+}
+#else
+#include <dirent.h>
+static int list_dir(const char *dir, char (*names)[1024], int max)
+{
+    DIR *d = opendir(*dir ? dir : ".");
+    int n = 0;
+    if (!d) return 0;
+    for (struct dirent *e; n < max && (e = readdir(d)); ) {
+        if (e->d_name[0] == '.') continue;
+        snprintf(names[n++], 1024, "%s%s%s", dir, (*dir && dir[strlen(dir) - 1] != '/') ? "/" : "", e->d_name);
+    }
+    closedir(d);
+    return n;
+}
+#endif
+
+static uint32_t crc32_buf(const uint8_t *p, size_t n);
+
+/* first translated ROM (in rc_games order, of language `lang` if given)
+ * present in `dir`; candidates are files of a Game Boy ROM size */
+static int find_rom(const char *dir, const char *lang, char *out, size_t outsz)
+{
+    static char names[256][1024];
+    uint32_t crcs[256];
+    int n = list_dir(dir, names, 256), m = 0;
+    for (int i = 0; i < n; i++) {
+        SDL_RWops *f = SDL_RWFromFile(names[i], "rb");
+        if (!f) continue;
+        Sint64 sz = SDL_RWsize(f);
+        SDL_RWclose(f);
+        if (sz < 0x8000 || sz > 0x800000 || (sz & 0x3FFF)) continue;
+        size_t len = 0;
+        uint8_t *d = SDL_LoadFile(names[i], &len);
+        if (!d) continue;
+        crcs[m] = crc32_buf(d, len);
+        SDL_free(d);
+        if (m != i) memcpy(names[m], names[i], sizeof names[0]);
+        m++;
+    }
+    for (int g = 0; rc_games[g]; g++) {
+        if (lang && *lang && strcmp(rc_games[g]->lang, lang)) continue;
+        for (int i = 0; i < m; i++)
+            if (crcs[i] == rc_games[g]->crc) {
+                snprintf(out, outsz, "%s", names[i]);
+                return 1;
+            }
+    }
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     /* Configuration, for the launcher: command line
-     *   [--lang en|fr] [--fullscreen] [--scale N] [--save file.sav] [rom]
+     *   [--lang en|fr] [--fullscreen] [--scale N] [--save file.sav] [--rom-dir DIR] [rom]
      * then <exe dir>/GB_CONFIG_NAME (lines key=value: lang, rom_en, rom_fr,
-     * rom, fullscreen, scale, save). The command line wins. */
-    static char cfg_rom[1024], cfg_lang[16], cfg_save[1024], cfg_palette[16] = "gbc";
+     * rom, rom_dir, fullscreen, scale, save, palette). The command line wins.
+     * ROM search: explicit path (argument, rom=, rom_<lang>=), then the
+     * executable's folder, then rom_dir (--rom-dir, GB_ROM_DIR), choosing the
+     * file by its content (CRC), never by its name. */
+    static char cfg_rom[1024], cfg_lang[16], cfg_save[1024], cfg_palette[16] = "gbc", cfg_romdir[1024];
     int fullscreen = 0, scale = 4;
     {
         char *base = SDL_GetBasePath();
@@ -415,6 +491,7 @@ int main(int argc, char **argv)
             if (*v == '"') v++;
             if (!strcmp(k, "lang")) snprintf(cfg_lang, sizeof cfg_lang, "%s", v);
             else if (!strcmp(k, "rom")) snprintf(cfg_rom, sizeof cfg_rom, "%s", v);
+            else if (!strcmp(k, "rom_dir")) snprintf(cfg_romdir, sizeof cfg_romdir, "%s", v);
             else if (!strncmp(k, "rom_", 4) && nroms < 4) {
                 snprintf(roms[nroms][0], sizeof roms[nroms][0], "%s", k + 4);
                 snprintf(roms[nroms][1], sizeof roms[nroms][1], "%s", v);
@@ -429,14 +506,25 @@ int main(int argc, char **argv)
             else if (!strcmp(argv[i], "--fullscreen")) fullscreen = 1;
             else if (!strcmp(argv[i], "--scale") && i + 1 < argc) scale = atoi(argv[++i]);
             else if (!strcmp(argv[i], "--save") && i + 1 < argc) snprintf(cfg_save, sizeof cfg_save, "%s", argv[++i]);
+            else if (!strcmp(argv[i], "--rom-dir") && i + 1 < argc) snprintf(cfg_romdir, sizeof cfg_romdir, "%s", argv[++i]);
             else if (argv[i][0] != '-') snprintf(cfg_rom, sizeof cfg_rom, "%s", argv[i]);
         }
+        if (getenv("GB_ROM_DIR") && !cfg_romdir[0]) snprintf(cfg_romdir, sizeof cfg_romdir, "%s", getenv("GB_ROM_DIR"));
         if (!cfg_rom[0]) {
             for (int i = 0; i < nroms; i++)
                 if (!cfg_lang[0] || !strcmp(cfg_lang, roms[i][0])) {
                     snprintf(cfg_rom, sizeof cfg_rom, "%s", roms[i][1]);
                     break;
                 }
+        }
+        /* no explicit ROM: look in the executable's folder, then in rom_dir,
+         * for a file whose content is one of the translated ROMs (CRC of the
+         * whole ROM: version and language), whatever its name */
+        if (!cfg_rom[0] && !getenv("GB_ROM")) {
+            char *exedir = SDL_GetBasePath();
+            if (!find_rom(exedir ? exedir : "", cfg_lang, cfg_rom, sizeof cfg_rom) && cfg_romdir[0])
+                find_rom(cfg_romdir, cfg_lang, cfg_rom, sizeof cfg_rom);
+            SDL_free(exedir);
         }
         SDL_free(txt);
         if (scale < 1) scale = 1;
@@ -446,16 +534,18 @@ int main(int argc, char **argv)
     g_logfile = fopen("gb_log.txt", "w");
     if (!rom_path) {
         const char *msg =
-            "Aucune ROM indiquee / No ROM given.\n\n"
-            "Donnez le chemin de votre ROM Pokemon (.gbc) en argument, ou dans " GB_CONFIG_NAME
-            " a cote du jeu :\n  rom_en=C:\\...\\Crystal (USA).gbc\n  rom_fr=C:\\...\\Cristal (France).gbc\n  lang=fr\n";
-        char full[1024];
+            "Aucune ROM trouvee / No ROM found.\n\n"
+            "Posez votre ROM a cote du jeu, ou indiquez le dossier de vos ROM dans " GB_CONFIG_NAME
+            " (le bon fichier est reconnu a son contenu, quel que soit son nom) :\n"
+            "  rom_dir=C:\\...\\roms\n  lang=fr\n"
+            "ou un chemin precis : rom_fr=C:\\...\\rom.gbc, ou en argument.\n";
+        char full[1500];
         if (cfg_lang[0])
-            snprintf(full, sizeof full, "Langue demandee : \"%s\" -> cle cherchee : rom_%s=\n\n%s", cfg_lang, cfg_lang, msg);
+            snprintf(full, sizeof full, "Langue demandee : \"%s\" (rom_dir : \"%s\")\n\n%s", cfg_lang, cfg_romdir, msg);
         else
             snprintf(full, sizeof full, "%s", msg);
         host_log("%s", full);
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Pokemon", full, NULL);
+        if (!getenv("GB_HEADLESS")) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Pokemon", full, NULL);
         return 1;
     }
     /* SDL_RWops: UTF-8 paths on Windows too */
