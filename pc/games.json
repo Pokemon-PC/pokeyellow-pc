@@ -1,0 +1,5 @@
+[
+  {"exe": "pokeyellow",
+   "en": {"make": "yellow", "rom": "pokeyellow.gbc", "sym": "pokeyellow.sym", "name": "yellow", "prefix": "yellow"},
+   "fr": {"title": "POKEMON YELAPSF", "name": "jaune", "roots": ["pc/roots_yellow_fr.txt", "pc/roots_yellow_fr_runtime.txt"]}}
+]
