@@ -43,3 +43,13 @@ cmake --build build/pc
   EN/FR trouvés depuis `rom_dir` seul. Paquets Windows (.zip) et Linux
   (.tar.gz, glibc >= 2.34 grâce à `pc/cmake/glibc_compat.h` et
   `-DGB_PORTABLE_GLIBC=ON`) faits avec `pc/tools/package.py`.
+- 2026-11-26 : tests de fin de jeu (anglais) avec `pc/tools/savedit.py` (édition de
+  sauvegarde + checksum, `teleport1` en 1re gén.) et `play.py` (`poke`, `warp`) :
+  Cristal, Or, Rouge, Jaune → Ligue Pokémon, Panthéon, générique, « THE END » ✅.
+  Cristal : Pokédex, PC, salle de connexion (message hors ligne), échange avec Kyle,
+  horloge jour/nuit ✅. Reste : mêmes tests en français, Bleu/Argent, autres systèmes.
+- 2026-11-26 (suite) : fin de jeu en **français** validée pour Cristal, Or,
+  Rouge, Jaune (Ligue → Panthéon → générique) ; Argent FR jusqu'à Marion ;
+  Bleu EN : Ligue jusqu'au combat d'Olga. Adresses FR : identiques en 2e gén.,
+  +5 octets en 1re gén. Nouveau : `GB_POKE_KEEP` / `keep`. Guide complet des
+  tests et outils : `pc/GUIDE_TESTS.md`.

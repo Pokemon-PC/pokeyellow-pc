@@ -169,6 +169,50 @@ void host_frame(const uint32_t *fb)
     if (max_frames && frame_no >= max_frames) g_quit = 1;
     if (state_save_at && frame_no == state_save_at) state_pending = 1;
     /* GB_STATE_WHEN=ADDR:VAL:path (hex): save a state and quit once memory[ADDR] == VAL */
+    /* GB_POKE=frame:ADDR=hex hex..;frame:ADDR=..  write memory at a frame (tests:
+     * warps, flags). Applied between frames, through the normal bus. */
+    if (getenv("GB_POKE")) {
+        const char *p = getenv("GB_POKE");
+        while (*p) {
+            char *e;
+            unsigned long f = strtoul(p, &e, 10);
+            if (*e != ':') break;
+            p = e + 1;
+            unsigned addr = (unsigned)strtoul(p, &e, 16);
+            if (*e != '=') break;
+            p = e + 1;
+            while (*p && *p != ';') {
+                while (*p == ' ') p++;
+                if (!*p || *p == ';') break;
+                unsigned v = (unsigned)strtoul(p, &e, 16);
+                if (e == p) break;
+                if (f == frame_no) wr((uint16_t)addr, (uint8_t)v);
+                addr++;
+                p = e;
+            }
+            if (*p == ';') p++;
+        }
+    }
+    /* GB_POKE_KEEP=ADDR=hex hex..;ADDR=..  rewritten at every frame (tests: freeze
+     * HP/PP/status like a cheat code) */
+    if (getenv("GB_POKE_KEEP")) {
+        const char *p = getenv("GB_POKE_KEEP");
+        while (*p) {
+            char *e;
+            unsigned addr = (unsigned)strtoul(p, &e, 16);
+            if (*e != '=') break;
+            p = e + 1;
+            while (*p && *p != ';') {
+                while (*p == ' ') p++;
+                if (!*p || *p == ';') break;
+                unsigned v = (unsigned)strtoul(p, &e, 16);
+                if (e == p) break;
+                wr((uint16_t)addr++, (uint8_t)v);
+                p = e;
+            }
+            if (*p == ';') p++;
+        }
+    }
     static int state_when_done;
     if (getenv("GB_STATE_WHEN") && !state_pending && !state_when_done) {
         const char *v = getenv("GB_STATE_WHEN");

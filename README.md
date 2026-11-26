@@ -49,6 +49,8 @@ python pc/build.py --rom-fr "<ROM française>"
 Le C généré n'est pas dans le dépôt : il est produit à la compilation. Les
 détails (méthode, outils de test, journal) sont dans
 [`pc/PORTING_ROADMAP.md`](pc/PORTING_ROADMAP.md).
+Tests, outils et débogage (parcours scriptés, états, téléportation,
+vérification du traducteur) : [`pc/GUIDE_TESTS.md`](pc/GUIDE_TESTS.md).
 
 ## English
 
